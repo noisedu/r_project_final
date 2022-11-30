@@ -1,0 +1,112 @@
+---
+title: "NYPD Shooting Report"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  editor_options: 
+    chunk_output_type: inline
+---
+
+### I have included all my commands that lead to everything as code blocks. I showed only the output of the most integral ones. I hope you enjoy :D
+
+## Beginnings
+
+```{r}
+library(tidyverse)
+library(RcppRoll)
+library(lubridate)
+
+```
+
+The URL our data is located in
+
+```{r}
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+```
+
+Loading our data into R
+
+```{r}
+nyc_data <- read_csv(url_in)
+```
+
+Changing the date column to be an actual datetime object
+
+```{r}
+nyc_data <- nyc_data %>% mutate(OCCUR_DATE = mdy(OCCUR_DATE))
+```
+
+Remove unnecessary columns that don't help our analysis
+
+```{r}
+nyc_data <- nyc_data %>% select(-c(X_COORD_CD,Y_COORD_CD,Latitude, Longitude,Lon_Lat))
+```
+
+![](table1.png)
+
+Quick Summary of the data
+
+```{r}
+summary(nyc_data)
+```
+
+## Visualisation
+
+Let's do some visualisation, for that we will first create a couple of interesting tables
+
+-   The number of records by Boro-\>Precint
+-   The total victim race
+-   The total perpetrator race
+
+```{r}
+nyc_boro <- nyc_data %>% group_by(BORO,PRECINCT) %>% count()
+
+
+nyc_vic_total <- nyc_data %>% group_by(VIC_RACE) %>% count()
+
+nyc_vic_total %>% ggplot(aes(y=VIC_RACE,x=n)) + geom_bar(stat="identity") + labs(title = "Victim Race",x="Amount", y="Race")
+
+nyc_perp_total <- nyc_data %>% group_by(PERP_RACE) %>% count()
+
+nyc_perp_total %>% ggplot(aes(y=PERP_RACE,x=n)) + geom_bar(stat="identity") + labs(title = "Perp Race",x="Amount", y="Race")
+
+```
+
+How many incidents per Date? Lets also plot this
+
+```{r}
+nyc_date_total <- nyc_data %>% group_by(OCCUR_DATE) %>% count()
+
+
+nyc_date_total %>% ggplot(aes(x=OCCUR_DATE,y=n)) + geom_bar(stat="identity") + labs(title = "Cases over Time",x="Date", y="Number of cases")
+```
+
+Preparing for Analysis of total cases over time and plotting for total cases over time
+
+```{r}
+nyc_date_total$total <- cumsum(nyc_date_total$n)
+nyc_date_total %>% ggplot(aes(x=OCCUR_DATE,y=total)) + geom_line(stat="identity") + labs(title = "total Cases over Time",x="Date", y="Total Number of cases")
+```
+
+## Modeling
+
+```{r}
+mod <- lm( total ~ OCCUR_DATE , data=nyc_date_total)
+
+mod2 <- lm( n ~ OCCUR_DATE, data=nyc_date_total)
+
+nyc_date_total$pred1 <- predict(mod)
+
+nyc_date_total$pred2 <- predict(mod2)
+
+ggplot(nyc_date_total, aes(x=OCCUR_DATE)) +  geom_line(aes(y=total), color="black") + geom_line(aes(y=pred1), color="red") + labs(title = "total Cases over Time",x="Date", y="Total Number of cases")
+
+```
+
+So we can see overall, it trends downwards. Meaning the cases per day are falling steadily.
+
+### About Bias
+
+This Data could have some certain racial bias. Not every crime gets reported. Some neighbourhoods with racial bias might be profiled more. Or in general, the people might be misidentified.
