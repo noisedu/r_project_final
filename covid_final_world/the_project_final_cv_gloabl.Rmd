@@ -1,0 +1,204 @@
+---
+title: "WorldWide Covid Final"
+output: html_document
+date: "2022-11-08"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Science Covid Adventure
+
+```{r import library}
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+
+```
+
+## 1. Importing the Data
+
+Creating the URLs
+
+```{r create_URLs}
+url_github <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+
+file_names <- c("time_series_covid19_confirmed_global.csv","time_series_covid19_deaths_global.csv")
+
+full_urls <- str_c(url_github, file_names)
+```
+
+Read Data into R
+
+```{r read_in_data}
+cases <- read_csv(full_urls[1])
+deaths <- read_csv(full_urls[2])
+```
+
+## 2. Formating the Data
+
+Changing the Column names.
+
+```{r rename}
+cases <- cases %>% rename(Country = "Country/Region", Province = "Province/State")
+deaths <- deaths %>% rename(Country = "Country/Region", Province = "Province/State")
+```
+
+Data is row based, we will Pivot it into the correct shape.
+
+```{r pivot_data}
+cases_pivot <- cases %>% pivot_longer(cols = -c("Province", "Country", Lat, Long), names_to = "date", values_to = "cases") %>% select(-c(Lat,Long))
+deaths_pivot <- deaths %>% pivot_longer(cols = -c("Province", "Country", Lat, Long), names_to = "date", values_to = "deaths") %>% select(-c(Lat,Long))
+
+```
+
+Joining the Death and Cases Data into a single DataFrame.
+
+```{r format_data}
+global <- cases_pivot %>% full_join(deaths_pivot) %>% mutate(date = mdy(date))
+```
+
+Let's look at a short summary of our data.
+
+```{r summary}
+summary(global)
+```
+
+We can see 0 as a minimum which is plausible, let's checl if the maximums are feasible.
+
+```{r check_plausibility}
+
+global %>% filter(cases > 95000000)
+global %>% filter(deaths > 1000000)
+
+
+```
+
+Yes they seem to be okay.
+
+## 3. Analysis
+
+### Totals
+
+Let's get some insights on the total amount of cases and deaths per Country.
+
+```{r get_totals}
+global_totals <- global %>% group_by(Country) %>% summarise(total_cases = sum(cases), total_deaths = sum(deaths))
+
+cases_totals <-  global_totals %>% arrange(desc(total_cases))
+death_totals <-  global_totals %>% arrange(desc(total_deaths))
+```
+
+Now that we have that, why don't we check the Top 10 of each Category.
+
+```{r highest_totals}
+top_cases <- cases_totals %>% slice(1:10) %>% .$Country
+top_deaths <- death_totals %>% slice(1:10) %>% .$Country
+
+cases_totals %>% slice(1:10)  %>% ggplot(., aes(x=factor(Country, level = top_cases), y=total_cases))+ geom_bar(stat='identity') + labs(title = "Top 10 Case Totals",x="Country", y="Number of cases")
+
+death_totals %>% slice(1:10)  %>% ggplot(., aes(x=factor(Country, level = top_deaths), y=total_deaths))+ geom_bar(stat='identity') + labs(title = "Top 10 Death Totals",x="Country", y="Number of deaths")
+
+```
+
+Interesting. We can see the top 10 are mostly by similar Countries. US is first in deaths and cases for example, but some don't have matching spots. Let's look into it further.
+
+### Difference
+
+```{r positions}
+
+death_totals$death_pos <- seq.int(nrow(death_totals))
+cases_totals$cases_pos <- seq.int(nrow(cases_totals))
+total_pos <- merge(cases_totals,death_totals)
+total_pos$dif <- total_pos$cases_pos - total_pos$death_pos
+total_pos <-  total_pos %>% arrange(desc(dif))
+total_pos$fac <-  scales::percent(total_pos$total_deaths / total_pos$total_cases)
+
+```
+
+```{r stats}
+total_stats <- total_pos
+total_stats$total_cases <- NULL
+total_stats$total_deaths <- NULL
+```
+#### Top 10 by difference
+```{r difference}
+
+total_stats <- total_stats %>% arrange(fac)
+total_stats %>% slice(1:10)
+
+```
+
+```{r remove_bad}
+total_pos <- total_pos %>% arrange(fac)
+# remove Winter Olympics/non countries
+total_pos <- total_pos %>% slice(-c(2, 3, 4, 5))
+
+
+total_stats <-total_stats %>% arrange(desc(fac))
+total_pos <-total_pos %>% arrange(desc(fac))
+total_stats %>% slice(1:10)
+#remove NK for having more deaths than cases
+total_pos <- total_pos %>% slice(-c(3))
+```
+
+So let's look at the top 10 for each side. Countries where they have much higher Deaths to Cases ratio and the other way.
+
+#### Top 10 by difference
+
+```{r Top10}
+total_pos %>% arrange(desc(fac)) %>% slice(1:10)
+
+total_pos %>% arrange(fac) %>% slice(1:10)
+```
+
+## 4. Country Analysis and model
+
+### Analysis
+Germany and Italy are countries with very different covid policies. So let's compare the two. 
+
+```{r Germanyy}
+geit <- filter(global, Country == "Germany" |  Country == "Italy")
+italy <- filter(global,Country == "Italy")
+germany <- filter(global,Country == "Germany")
+```
+
+#### Cases over time
+```{r Cases}
+ggplot(geit, aes(x=date, y=cases, group=Country, color=Country)) + geom_line() + labs(title = "Cases over Time",x="Country", y="Number of cases")
+
+```
+
+#### Deaths over time
+```{r Deaths}
+ggplot(geit, aes(x=date, y=deaths, group=Country, color=Country)) +geom_line() + labs(title = "Deaths over Time",x="Country", y="Number of deaths")
+
+```
+
+#### ML Model
+```{r models}
+mod <- lm(deaths ~ date, data=germany)
+germany$pred <- predict(mod)
+
+
+modi <- lm(deaths ~ date, data=italy)
+germany$predi <- predict(modi)
+```
+
+##### Predictions are Red for Germany, Blue is actual Germany
+```{r Develop}
+
+ggplot(germany,aes(x=date)) + geom_line(aes(y = deaths), color="red") + geom_line(aes(y = pred), color="blue") + labs(title = "Deaths Development over time",x="Date", y="Case Development")
+```
+
+We can see that cases are still rising at a significant rate. The actual numbers are pretty close towards the trend line, which is pretty interesting. Before we were boomeranging around the trend line. 
+
+This does make a lot of sense as pandemic spread is very regularized and rises and drops very harmonically. We can see great curves and no sharp edges. We can see the actual number slowing down seeing we will most likely see easing of the curve. See a reduction in deaths. 
+
+### 5. Bias
+
+There are some possible points of bias in the data and analysis, which I will briefly talk about here. This Data is not collected by one single entity, each country reports their own numbers. There are many different definitions cases and deaths can have, so comparing them one to one can only be done with a disclaimer. 
+
+Furthermore, the case numbers are very much dependent on how much testing is going on in these countries. If a country is poor it might not have access to as many Covid tests as a rich nation. There can only be as many confirmed cases as you test. One example of this is North Korea, while exploring the data we saw that they have more deaths than cases. Clearly showing that there are way more covid cases in North Korea than the data suggests. 

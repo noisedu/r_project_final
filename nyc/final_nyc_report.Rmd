@@ -42,9 +42,11 @@ Remove unnecessary columns that don't help our analysis
 
 ```{r}
 nyc_data <- nyc_data %>% select(-c(X_COORD_CD,Y_COORD_CD,Latitude, Longitude,Lon_Lat))
+
+nyc_data
+
 ```
 
-![](table1.png)
 
 Quick Summary of the data
 
